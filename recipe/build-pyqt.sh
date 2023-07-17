@@ -39,6 +39,45 @@ if [[ "${CONDA_BUILD_CROSS_COMPILATION:-}" == "1" ]]; then
   EXTRA_FLAGS="--target-dir $SITE_PKGS_PATH"
 fi
 
+# Workaround for building QtDesigner plugin on Qt 5.15.x
+read -r PYLIB_DIR PYLIB_LIB PYLIB_SHLIB <<< $(cat <<EOF | $PREFIX/bin/python
+
+import sys
+from glob import glob
+from sysconfig import get_config_vars
+
+py_major, py_minor, *_ = sys.version_info
+ducfg = get_config_vars()
+
+exec_prefix = ducfg['exec_prefix']
+multiarch = ducfg.get('MULTIARCH', '')
+libdir = ducfg['LIBDIR']
+
+if glob('{}/lib/libpython{}.{}*'.format(exec_prefix, py_major, py_minor)):
+    pylib_dir = exec_prefix + '/lib'
+elif multiarch != '' and glob('{}/lib/{}/libpython{}.{}*'.format(exec_prefix, multiarch, py_major, py_minor)):
+    pylib_dir = exec_prefix + '/lib/' + multiarch
+elif glob('{}/libpython{}.{}*'.format(libdir, py_major, py_minor)):
+    pylib_dir = libdir
+
+abi = getattr(sys, 'abiflags', '')
+pylib_lib = 'python{}.{}{}'.format(py_major, py_minor, abi)
+
+pylib_shlib = ducfg.get('LDLIBRARY', '')
+
+print(pylib_dir, pylib_lib, pylib_shlib)
+
+EOF)
+
+cat <<EOF >> pyproject.toml
+
+[tool.sip.project]
+py-pylib-dir = "$PYLIB_DIR"
+py-pylib-lib = "$PYLIB_LIB"
+py-pylib-shlib = "$PYLIB_SHLIB"
+
+EOF
+
 $SIP_COMMAND \
 --verbose \
 --confirm-license \
